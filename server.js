@@ -1,38 +1,59 @@
 const express = require("express");
-const axios = require("axios");
 const cors = require('cors');
+const axios = require("axios");
+const sharp = require("sharp");
 
 const app = express();
 app.use(cors());
 
 const port = 3000;
 
-// Endpoint to fetch image and stream it to the client
+// Endpoint to download and compress image
 app.get("/download-image", async (req, res) => {
-    const imageUrl = req.query.url; // Get image URL from query parameter
+    const imageUrl = req.query.url; // استلام رابط الصورة من الـ query parameter
 
     if (!imageUrl) {
-        return res.status(400).send("Please provide an image URL as a query parameter (e.g., ?url=https://example.com/image.jpg)");
+        return res.status(400).send("يرجى تقديم رابط صورة كـ query parameter (مثل: ?url=https://example.com/image.jpg)");
     }
 
     try {
         const response = await axios({
             url: imageUrl,
             method: "GET",
-            responseType: "stream", // Fetch image as stream
+            responseType: "arraybuffer", // جلب الصورة كبيانات ثنائية
         });
 
-        const fileName = `image-${Date.now()}.jpg`; // Dynamic file name
-        res.setHeader("Content-Disposition", `attachment; filename="${fileName}"`);
-        res.setHeader("Content-Type", response.headers["content-type"]);
+        let imageBuffer = Buffer.from(response.data); // تحويل البيانات إلى Buffer
 
-        response.data.pipe(res); // Stream image data to the client
+        // ضغط الصورة باستخدام sharp
+        const compressedImage = await sharp(imageBuffer)
+            .jpeg({ quality: 70 }) // جودة 70% لضغط الصورة
+            .resize({ width: 1920 }) // تصغير العرض (يحافظ على الأبعاد الأصلية)
+            .toBuffer();
+
+        console.log(`Original Size: ${(imageBuffer.length / 1024 / 1024).toFixed(2)} MB`);
+        console.log(`Compressed Size: ${(compressedImage.length / 1024 / 1024).toFixed(2)} MB`);
+
+        // التحقق مما إذا كانت الصورة لا تزال أكبر من 2 ميجا، فيتم ضغطها أكثر
+        let quality = 70;
+        while (compressedImage.length > 2 * 1024 * 1024 && quality > 30) {
+            quality -= 10;
+            imageBuffer = await sharp(imageBuffer)
+                .jpeg({ quality })
+                .resize({ width: 1920 })
+                .toBuffer();
+        }
+
+        res.setHeader("Content-Disposition", `attachment; filename="compressed-image.jpg"`);
+        res.setHeader("Content-Type", "image/jpeg");
+
+        res.send(imageBuffer);
     } catch (error) {
-        console.error("Error fetching the image:", error.message);
-        res.status(500).send("Failed to download the image. Please check the URL.");
+        console.error("Error processing the image:", error.message);
+        res.status(500).send("فشل تحميل الصورة. يرجى التحقق من الرابط.");
     }
 });
 
 app.listen(port, () => {
-    console.log(`Server running on http://localhost:${port}`);
+    console.log(`✅ Server running on http://localhost:${port}`);
 });
